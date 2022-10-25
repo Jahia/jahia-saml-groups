@@ -4,7 +4,6 @@ import org.apache.commons.lang.StringUtils;
 import org.jahia.api.usermanager.JahiaUserManagerService;
 import org.jahia.modules.jahiaauth.service.ConnectorConfig;
 import org.jahia.modules.jahiaauth.service.ConnectorResultProcessor;
-import org.jahia.modules.jahiaauth.service.JahiaAuthConstants;
 import org.jahia.services.content.decorator.JCRGroupNode;
 import org.jahia.services.content.decorator.JCRUserNode;
 import org.jahia.services.usermanager.JahiaGroupManagerService;
@@ -23,12 +22,19 @@ import java.util.Map;
 public class GroupProcessor implements ConnectorResultProcessor {
     private static final Logger logger = LoggerFactory.getLogger(GroupProcessor.class);
 
+    private static final String LOGIN_ATTRIBUTE_ASSIGNMENT = "login-attribute-assignment";
+    private static final String LOGIN_ATTRIBUTE = "login";
+    private static final String GROUPS_ATTRIBUTE_ASSIGNMENT = "groups-attribute-assignment";
+    private static final String GROUPS_ATTRIBUTE = "groups";
+
     private JahiaUserManagerService jahiaUserManagerService;
     private JahiaGroupManagerService jahiaGroupManagerService;
+    private String loginAttributeAssignment;
     private String groupsAttributeAssignment;
 
     public GroupProcessor() {
-        groupsAttributeAssignment = "groups";
+        loginAttributeAssignment = LOGIN_ATTRIBUTE;
+        groupsAttributeAssignment = GROUPS_ATTRIBUTE;
     }
 
     @Reference
@@ -43,8 +49,14 @@ public class GroupProcessor implements ConnectorResultProcessor {
 
     @Activate
     private void onActivate(Map<String, ?> configuration) {
-        if (configuration.containsKey("groups-attribute-assignement")) {
-            groupsAttributeAssignment = StringUtils.defaultIfBlank((String) configuration.get("groups-attribute-assignement"), "groups");
+        if (logger.isDebugEnabled()) {
+            logger.debug("Configuration: {}", configuration);
+        }
+        if (configuration.containsKey(LOGIN_ATTRIBUTE_ASSIGNMENT)) {
+            loginAttributeAssignment = StringUtils.defaultIfBlank((String) configuration.get(LOGIN_ATTRIBUTE_ASSIGNMENT), LOGIN_ATTRIBUTE);
+        }
+        if (configuration.containsKey(GROUPS_ATTRIBUTE_ASSIGNMENT)) {
+            groupsAttributeAssignment = StringUtils.defaultIfBlank((String) configuration.get(GROUPS_ATTRIBUTE_ASSIGNMENT), GROUPS_ATTRIBUTE);
         }
     }
 
@@ -54,8 +66,11 @@ public class GroupProcessor implements ConnectorResultProcessor {
             logger.debug("SAML properties: {}", results);
         }
         try {
-            if (results.containsKey(JahiaAuthConstants.SSO_LOGIN)) {
-                String userId = (String) results.get(JahiaAuthConstants.SSO_LOGIN);
+            if (results.containsKey(loginAttributeAssignment)) {
+                String userId = (String) results.get(loginAttributeAssignment);
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Looking for user {} in site {}", userId, connectorConfig.getSiteKey());
+                }
                 JCRUserNode userNode = jahiaUserManagerService.lookupUser(userId, connectorConfig.getSiteKey());
                 if (userNode != null) {
                     removeUserMembership(userNode);
@@ -82,10 +97,19 @@ public class GroupProcessor implements ConnectorResultProcessor {
     }
 
     private void manageUserGroups(JCRUserNode userNode, String siteKey, List<String> groups) {
+        if (logger.isDebugEnabled()) {
+            logger.debug("Looking groups for user: {}", userNode.getPath());
+        }
         if (groups != null) {
             groups.forEach(groupName -> {
                 try {
                     JCRGroupNode group = jahiaGroupManagerService.lookupGroup(siteKey, groupName);
+                    if (group == null) {
+                        group = jahiaGroupManagerService.lookupGroup(null, groupName);
+                    }
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("Looking for group: {} => {}", groupName, group);
+                    }
                     if (group != null) {
                         group.addMember(userNode);
                         group.saveSession();
